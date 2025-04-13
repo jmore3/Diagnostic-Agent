@@ -17,7 +17,9 @@ This project is a simplified **Bayesian Decision Support System** that models pr
    venv\Scripts\activate
 
 3. Install dependencies:
+   '''bash
    pip install -r requirements.txt
 
-
-   
+5. Deactivate the Environment (when you're done)
+   '''bash
+   deactivate

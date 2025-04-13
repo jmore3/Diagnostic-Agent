@@ -4,7 +4,7 @@ This project is a simplified **Bayesian Decision Support System** that models pr
 ## 🧪 Setup Instructions (for teammates)
 1. Clone the repo:
    ```bash
-   git clone https://github.com/YOUR_USERNAME/Diagnostic-Agent.git
+   git clone https://github.com/jmore3/Diagnostic-Agent.git
    cd Diagnostic-Agent
 
 2. Create and activate virtual environment:

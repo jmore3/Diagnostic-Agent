@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 Disease,Fever,Cough,Fatigue,Difficulty Breathing,Age,Gender,Blood Pressure,Cholesterol Level,Outcome Variable
 Influenza,Yes,No,Yes,Yes,19,Female,Low,Normal,Positive
 Common Cold,No,Yes,Yes,No,25,Female,Normal,Normal,Negative
@@ -348,7 +347,7 @@ Stroke,Yes,No,Yes,No,80,Female,High,High,Positive
 Stroke,Yes,No,Yes,No,85,Male,High,High,Positive
 Stroke,Yes,No,Yes,No,85,Male,High,High,Positive
 Stroke,Yes,No,Yes,No,90,Female,High,High,Positive
-=======
+Stroke,Yes,No,Yes,No,90,Female,High,High,Positive
 Disease,Fever,Cough,Fatigue,Difficulty Breathing,Age,Gender,Blood Pressure,Cholesterol Level,Outcome Variable
 Influenza,Yes,No,Yes,Yes,19,Female,Low,Normal,Positive
 Common Cold,No,Yes,Yes,No,25,Female,Normal,Normal,Negative
@@ -698,5 +697,4 @@ Stroke,Yes,No,Yes,No,80,Female,High,High,Positive
 Stroke,Yes,No,Yes,No,85,Male,High,High,Positive
 Stroke,Yes,No,Yes,No,85,Male,High,High,Positive
 Stroke,Yes,No,Yes,No,90,Female,High,High,Positive
->>>>>>> 5f595080e60df0821df9bdc0af9a8c688b0025f5
 Stroke,Yes,No,Yes,No,90,Female,High,High,Positive

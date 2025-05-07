@@ -1,27 +1,28 @@
 import os
 import logging
-import pandas as pd
 import numpy as np
-from itertools import product
-from src.diagnostic_agent import build_joint_probability, inference_by_enumeration
-from sklearn.model_selection import train_test_split
-from sklearn.naive_bayes import CategoricalNB
-from sklearn.metrics import roc_curve, auc
-import matplotlib.pyplot as plt
-import joblib
+import pandas as pd
 
-# Formatter for colored console output
+from src.diagnostic_agent import load_dataset, build_joint_probability, inference_by_enumeration
+from src.analyze_marginals import compute_all_marginals
+from src.models.bayesian_model import BayesianDiagnosticModel
+from src.evaluate import evaluate_models
+
+# Colored console output
+class ColoredFormatter(logging.Formatter):
+    RESET  = "\x1b[0m"
+    WHITE  = "\x1b[37m"
+    RED    = "\x1b[31m"
+
+    def format(self, record):
+        msg = super().format(record)
+        if record.levelno >= logging.WARNING:
+            return f"{self.RED}{msg}{self.RESET}"
+        else:
+            return f"{self.WHITE}{msg}{self.RESET}"
+
+
 def setup_logger():
-    class ColoredFormatter(logging.Formatter):
-        RESET = "\x1b[0m"
-        WHITE = "\x1b[37m"
-        RED   = "\x1b[31m"
-
-        def format(self, record):
-            msg = super().format(record)
-            color = self.RED if record.levelno >= logging.WARNING else self.WHITE
-            return f"{color}{msg}{self.RESET}"
-
     logger = logging.getLogger("DiagnosticAgent")
     logger.setLevel(logging.DEBUG)
     ch = logging.StreamHandler()
@@ -32,107 +33,85 @@ def setup_logger():
     logger.addHandler(ch)
     return logger
 
-if __name__ == "__main__":
+
+def main():
     logger = setup_logger()
-    logger.info("Starting Bayesian diagnostic agent with saved outputs and models")
+    logger.info("Starting Bayesian diagnostic agent")
 
-    # Create output directory
-    OUTPUT_DIR = "output"
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    # 1. Load the data
+    data_path = "data/normalized_health_data.csv"
+    logger.debug(f"Loading dataset from {data_path}")
+    df = load_dataset(data_path)
+    logger.info(f"Dataset loaded: {df.shape[0]} records, {df.shape[1]} columns")
 
-    # 1. Load and clean data
-    data_path = "data/Disease_symptom_and_patient_profile_dataset.csv"
-    df = pd.read_csv(data_path)
-    df["Age"] = pd.to_numeric(df["Age"], errors="coerce").astype('Int64')
-    before = len(df)
-    df.dropna(subset=["Age"], inplace=True)
-    df["Age"] = df["Age"].astype(int)
-    dropped = before - len(df)
-    if dropped:
-        logger.warning(f"Dropped {dropped} rows due to invalid Age")
-
-    # 2. Encode features
-    df["Symptom1"] = df["Fever"].map({"No":0, "Yes":1})
-    df["Symptom2"] = df["Cough"].map({"No":0, "Yes":1})
-    df["Symptom3"] = df["Fatigue"].map({"No":0, "Yes":1})
-    df["Symptom4"] = df["Difficulty Breathing"].map({"No":0, "Yes":1})
-    df["AgeBin"]    = pd.cut(df["Age"], bins=[0,20,30,40,50,60,999], labels=[0,1,2,3,4,5]).astype(int)
-    df["GenderCode"] = df["Gender"].map({"Male":0, "Female":1})
-    df["BPCode"]     = pd.Categorical(df["Blood Pressure"], categories=["Low","Normal","High"]).codes
-    df["CholCode"]   = pd.Categorical(df["Cholesterol Level"], categories=["Low","Normal","High"]).codes
-
-    # 3. Encode target
-    df["Condition"] = pd.Categorical(df["Disease"]).codes
-    disease_cat      = pd.Categorical(df["Disease"])
-    disease_names    = list(disease_cat.categories)
-    num_conditions   = len(disease_names)
-    logger.info(f"Detected {num_conditions} distinct conditions")
-
-    # 4. Build joint & save
-    features   = ["Symptom1","Symptom2","Symptom3","Symptom4",
-                  "AgeBin","GenderCode","BPCode","CholCode"]
-    data_array = df[features + ["Condition"]].values.astype(int)
-    joint = build_joint_probability(data_array, num_conditions=num_conditions, alpha=0.0)
-    logger.info("Built joint distribution without smoothing")
-
-    # Save joint probability array
-    joint_path = os.path.join(OUTPUT_DIR, "joint_probability.npy")
-    np.save(joint_path, joint)
-    logger.info(f"Saved joint probability array to {joint_path}")
-
-    # Query by enumeration & save chart
-    query_vector = [1, -1, -1, 1, -1, -1, -1, -1, -2]
-    posterior = inference_by_enumeration(joint, query_vector)
-    fig, ax = plt.subplots(figsize=(8,4))
-    ax.bar(range(len(posterior)), posterior)
-    ax.set_xticks(range(len(posterior)))
-    ax.set_xticklabels(disease_names, rotation=90, fontsize=8)
-    ax.set_ylabel("P(condition | evidence)")
-    ax.set_title("Enumeration-based Posterior")
-    plt.tight_layout()
-    enum_png = os.path.join(OUTPUT_DIR, "enumeration_posterior.png")
-    fig.savefig(enum_png, dpi=300)
-    logger.info(f"Saved enumeration posterior chart to {enum_png}")
-
-    # Also save posterior array
-    post_path = os.path.join(OUTPUT_DIR, "enumeration_posterior.npy")
-    np.save(post_path, posterior)
-    logger.info(f"Saved enumeration posterior array to {post_path}")
-
-    # 5. Train/test split & NB
-    X = df[features].values
+    # 2. Split into train/test sets
+    from sklearn.model_selection import train_test_split
+    X = df[["Symptom1","Symptom2","Symptom3","Symptom4"]].values
     y = df["Condition"].values
     X_train, X_test, y_train, y_test = train_test_split(
-        X, y, stratify=y, test_size=0.3, random_state=42
+        X, y, test_size=0.3, random_state=42, stratify=y
     )
-    logger.info(f"Train/test split: {len(X_train)} / {len(X_test)}")
+    logger.info(f"Split: {len(X_train)} train / {len(X_test)} test")
 
-    clf = CategoricalNB()
-    clf.fit(X_train, y_train)
-    logger.info("Fitted CategoricalNB on training set")
+    # 3. Build joint distribution on training data
+    train_data = np.hstack((X_train, y_train.reshape(-1,1)))
+    logger.debug("Building joint probability table")
+    joint_prob = build_joint_probability(train_data, num_conditions=int(y.max())+1, alpha=0)
+    logger.info("Joint probability table built")
 
-    # Save the NB model
-    nb_path = os.path.join(OUTPUT_DIR, "categorical_nb_model.joblib")
-    joblib.dump(clf, nb_path)
-    logger.info(f"Saved Naïve-Bayes model to {nb_path}")
+    # 4. Single conditional query example
+    query_vector = [1, -1, -1, 1, -2]
+    logger.info(f"Performing inference by enumeration for query: {query_vector}")
+    post = inference_by_enumeration(joint_prob, query_vector)
+    for i, p in enumerate(post):
+        logger.info(f"  Condition {i}: {p:.4f}")
 
-    y_proba = clf.predict_proba(X_test)
+    # 5. Compute marginals (legacy)
+    logger.info("Computing all marginals (legacy function)")
+    marginals_legacy = compute_all_marginals(joint_prob)
+    for name, dist in marginals_legacy.items():
+        vals = ", ".join(f"{p:.4f}" for p in dist)
+        logger.info(f"  {name}: [{vals}]")
 
-    # 6. Plot & save ROC curves
-    fig, ax = plt.subplots(figsize=(8,6))
-    for i, name in enumerate(disease_names):
-        y_true = (y_test == i).astype(int)
-        fpr, tpr, _ = roc_curve(y_true, y_proba[:, i])
-        roc_auc = auc(fpr, tpr)
-        ax.plot(fpr, tpr, label=f"{name} (AUC={roc_auc:.2f})")
-    ax.plot([0,1], [0,1], "--", color="gray")
-    ax.set_xlabel("False Positive Rate")
-    ax.set_ylabel("True Positive Rate")
-    ax.set_title("ROC Curves by Condition")
-    ax.legend(bbox_to_anchor=(1.05,1), loc="upper left")
-    plt.tight_layout()
-    roc_png = os.path.join(OUTPUT_DIR, "roc_curves.png")
-    fig.savefig(roc_png, dpi=300)
-    logger.info(f"Saved ROC curves to {roc_png}")
+    # 6. Fit BayesianDiagnosticModel
+    logger.debug("Instantiating BayesianDiagnosticModel")
+    model = BayesianDiagnosticModel()
+    model.fit_joint(train_data, num_conditions=int(y.max())+1)
+    model.fit_naive_bayes(train_data, alpha=1.0)
+    logger.info("Fitted both joint and Naïve-Bayes models")
 
-    logger.info("All done — outputs and models saved in 'output/' directory.")
+    # 7. Compute marginals (model interface)
+    logger.info("Computing all marginals (model methods)")
+    marginals_model = BayesianDiagnosticModel.compute_all_marginals(model)
+    for name, dist in marginals_model.items():
+        vals = ", ".join(f"{p:.4f}" for p in dist)
+        logger.info(f"  {name}: [{vals}]")
+
+    # 8. Compare enumeration vs NB for a sample evidence
+    evidence = {0:1, 2:0}
+    logger.info(f"Comparing inference methods for evidence: {evidence}")
+    post_enum = model.inference_by_enumeration(query_index=4, evidence=evidence)
+    post_nb   = model.naive_bayes_inference(evidence)
+    logger.info("Enumeration-based posterior:")
+    for i, p in enumerate(post_enum): logger.info(f"  Condition {i}: {p:.4f}")
+    logger.info("Naïve-Bayes posterior:")
+    for i, p in enumerate(post_nb):   logger.info(f"  Condition {i}: {p:.4f}")
+
+    # 9. Evaluate performance on test set
+    os.makedirs("output", exist_ok=True)
+    logger.info("Evaluating model accuracy and confusion (test set)")
+    disease_names = list(df['Disease'].astype('category').cat.categories)
+    evaluate_models(
+        joint=joint_prob,
+        nb_model=model,
+        X_test=X_test,
+        y_test=y_test,
+        disease_names=disease_names,
+        output_dir="output"
+    )
+
+    logger.info("All done — exiting.")
+
+
+if __name__ == "__main__":
+    main()

@@ -6,7 +6,7 @@ import pandas as pd
 from src.diagnostic_agent import load_dataset, build_joint_probability, inference_by_enumeration
 from src.analyze_marginals import compute_all_marginals
 from src.models.bayesian_model import BayesianDiagnosticModel
-from src.evaluate import evaluate_models
+from src.evaluation import evaluate_models
 
 # Colored console output
 class ColoredFormatter(logging.Formatter):

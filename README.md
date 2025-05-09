@@ -1,35 +1,126 @@
 # Diagnostic-Agent
 
-This project is a simplified **Bayesian Decision Support System** that models probabilistic relationships between symptoms and conditions.
+A simplified **Bayesian Decision Support System** for health diagnostics.
 
-## 🛠️ Setup Instructions (for teammates)
+## 📁 Repository Structure
 
-### 1. Clone the Repo
-```bash
-git clone https://github.com/jmore3/Diagnostic-Agent.git
-cd Diagnostic-Agent
+```
+Diagnostic-Agent/
+├─ data/
+│  └─ normalized_health_data.csv
+├─ src/
+│  ├─ diagnostic_agent.py
+│  ├─ analyze_marginals.py
+│  ├─ visualization.py
+│  └─ models/bayesian_model.py
+├─ notebook/
+│  └─ visualizations.ipynb
+├─ tests/
+│  ├─ test_diagnostic_agent.py
+│  └─ test_full_feature_agent.py
+├─ venv/                 # your virtual environment
+├─ main.py
+├─ requirements.txt
+├─ pytest.ini
+└─ README.md
 ```
 
-### 2. Create and activate virtual environment:
+## 🛠️ Setup
 
-#### For macOS/Linux:
+1. **Create a fresh virtual environment**
+
+   ```bash
+   python -m venv venv
+   ```
+
+2. **Activate the venv**
+
+   * **Windows cmd.exe**
+
+     ```bat
+     venv\Scripts\activate.bat
+     ```
+   * **PowerShell (temporary bypass)**
+
+     ```powershell
+     Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+     .\venv\Scripts\Activate.ps1
+     ```
+   * **macOS/Linux**
+
+     ```bash
+     source venv/bin/activate
+     ```
+
+3. **Install dependencies**
+
+   ```bash
+   pip install --upgrade pip
+   pip install -r requirements.txt
+   ```
+
+## 🚀 Running the Core Agent
+
+From the project root:
+
 ```bash
-python -m venv venv
-source venv/bin/activate
+python main.py
 ```
 
-#### For Windows:
+This will:
+
+1. Load and normalize the data.
+2. Build both joint-distribution and Naïve-Bayes models.
+3. Compute marginals, perform sample inferences, and print results.
+4. Produce and display all visualizations (symptom marginals, full marginal panel, heatmap, ROC, calibration, PR curves, confusion matrix).
+
+## 📊 Jupyter Notebook Visualizations
+
+If you want interactive plots in Jupyter:
+
+1. **Ensure your venv is activated** (see above).
+2. **Launch from the project root**:
+
+   ```bash
+   cd notebook
+   python -m notebook
+   ```
+3. Open **visualizations.ipynb** in your browser and run all cells.
+
+## 🧪 Testing
+
+Run all unit tests with:
+
 ```bash
-python -m venv venv
-venv\Scripts\activate
+python -m pytest
 ```
 
-### 3. Install dependencies:
-```bash
-pip install -r requirements.txt
+## 🔧 Adding New Plots
+
+All plotting functions live in `src/visualization.py`. You can:
+
+* **`plot_symptom_marginals(joint)`**
+* **`plot_full_marginal_distributions(joint, alpha=0)`**
+* **`plot_heatmap_top1(joint)`**
+* **Calibration, PR and confusion helpers**
+
+They’re all invoked from `main.py` already, but you can import and call them directly:
+
+```python
+from src.visualization import plot_full_marginal_distributions
+plot_full_marginal_distributions(joint_prob, df, k=10)
 ```
 
-### 4. Deactivate the Environment (when you're done)
-```bash
-deactivate
+## 📂 Saving Output
+
+By default, the full-marginals panel is saved to:
+
 ```
+output/marginals_top10.png
+```
+
+and you can override the directory or filename in the call.
+
+---
+
+Feel free to tweak any of the parameters (e.g. number of top conditions `k`, DPI, figure sizes) to suit your reports and slides.

@@ -1,119 +1,102 @@
 import numpy as np
 import pandas as pd
 from itertools import product
-from copy import deepcopy
-
 
 class BayesianDiagnosticModel:
-    def __init__(self, symptom_dims=(2, 2, 2, 2), condition_dim=4):
+    def __init__(self, symptom_dims=None, condition_dim=None):
+        """
+        symptom_dims: tuple of cardinalities for each feature (if None, inferred on fit_joint)
+        condition_dim: number of classes (if None, inferred on fit_joint)
+        """
         self.symptom_dims = symptom_dims
         self.condition_dim = condition_dim
         self.joint_prob = None
-        self.nb_cond_probs = None
         self.nb_prior = None
+        self.nb_cond_probs = None
 
     def fit_joint(self, data: np.ndarray):
         """
-        data: array of shape (N, 5): cols [s1, s2, s3, s4, cond]
-        Learns full joint P(S1,…,S4,C).
+        Learns full joint P(X1,…,Xk,C).
+        data: array shape (N, k+1) with last column = condition.
         """
+        # infer dims if not set
+        if self.symptom_dims is None or self.condition_dim is None:
+            maxes = data.max(axis=0).astype(int)
+            self.symptom_dims = tuple(maxes[:-1] + 1)
+            self.condition_dim = int(maxes[-1] + 1)
+
+        # initialize count array
         counts = np.zeros(self.symptom_dims + (self.condition_dim,), dtype=float)
-        for s1, s2, s3, s4, c in data:
-            counts[s1, s2, s3, s4, c] += 1
+        for row in data.astype(int):
+            *xs, c = row
+            idx = tuple(xs) + (c,)
+            counts[idx] += 1
+
         self.joint_prob = counts / counts.sum()
 
     def inference_by_enumeration(self, query_index: int, evidence: dict):
         """
-        Returns P(query_var | evidence).
-
-        query_index: 0–3 for Symptom1–4, 4 for Condition
-        evidence: dict var_index->value, e.g. {0:1, 2:0}
+        P(query_var | evidence) by summing out hidden vars.
+        query_index: 0..k-1 for features, k for condition.
+        evidence: dict var_index->value.
         """
         assert self.joint_prob is not None, "Call fit_joint first"
-
-        # determine domain sizes
-        domain_sizes = list(self.symptom_dims) + [self.condition_dim]
-        # prepare unnormalized posterior
-        Q = domain_sizes[query_index]
+        domain = list(self.symptom_dims) + [self.condition_dim]
+        Q = domain[query_index]
         unnorm = np.zeros(Q, dtype=float)
-
-        # iterate over all joint cells
-        # using np.ndindex is a bit cleaner than nested loops
-        for idx in np.ndindex(*domain_sizes):
-            if any(idx[var] != val for var, val in evidence.items()):
+        for idx in np.ndindex(*domain):
+            if any(idx[i] != v for i, v in evidence.items()):
                 continue
             unnorm[idx[query_index]] += self.joint_prob[idx]
-
         total = unnorm.sum()
-        if total == 0:
-            # no support - return uniform or zeros
-            return np.zeros_like(unnorm)
-        return unnorm / total
+        return unnorm / total if total > 0 else np.zeros_like(unnorm)
 
     def marginal(self, var_index: int):
-        """
-        Compute P(var) by enumeration with no evidence.
-        var_index: 0–3 for symptoms, 4 for condition.
-        """
-        return self.inference_by_enumeration(var_index, evidence={})
+        """P(var_index) with no evidence."""
+        return self.inference_by_enumeration(var_index, {})
 
-    # ---- Naive Bayes alternative ----
     def fit_naive_bayes(self, data: np.ndarray, alpha: float = 1.0):
         """
-        Learns P(condition) and P(symptom_i | condition) with Laplace smoothing.
-        data: same format as fit_joint.
-        alpha: smoothing strength.
+        Learns P(C) and P(X_i = v | C) for categorical features.
+        data: (N, k+1) array; last column is condition.
         """
-        # separate inputs
-        symptoms = data[:, :4].astype(int)
-        conditions = data[:, 4].astype(int)
+        X = data[:, :len(self.symptom_dims)].astype(int)
+        y = data[:, -1].astype(int)
 
-        # prior P(condition)
-        cond_counts = np.bincount(conditions, minlength=self.condition_dim) + alpha
+        # prior
+        cond_counts = np.bincount(y, minlength=self.condition_dim) + alpha
         self.nb_prior = cond_counts / cond_counts.sum()
 
-        # conditional P(symptom_i = 1 | condition = c) for each symptom
+        # conditional
         self.nb_cond_probs = []
-        for i in range(4):
-            counts = np.zeros(self.condition_dim, dtype=float)
-
+        for i, dim in enumerate(self.symptom_dims):
+            counts = np.zeros((dim, self.condition_dim), dtype=float)
             for c in range(self.condition_dim):
-                counts[c] = alpha + np.sum(symptoms[conditions == c, i])
-
-            # total for each c = (#cases with cond=c) + 2*alpha (binary feature)
-            totals = cond_counts + 2 * alpha
-            self.nb_cond_probs.append(counts / totals)
+                hist = np.bincount(X[y == c, i], minlength=dim)
+                counts[:, c] = alpha + hist
+            totals = cond_counts + alpha * dim
+            self.nb_cond_probs.append(counts / totals[np.newaxis, :])
 
     def naive_bayes_inference(self, evidence: dict):
         """
-        P(condition | evidence) under NB assumption.
-        evidence: dict of symptom_index -> 0/1.
+        P(C | evidence) under NB assumption.
+        evidence: dict feature_index -> observed value.
         """
         assert self.nb_prior is not None, "Call fit_naive_bayes first"
-        log_joint = np.log(self.nb_prior.copy())
-        # for each piece of evidence multiply in P(symptom | cond)
-        for i, val in evidence.items():
-            p_i = self.nb_cond_probs[i]
-            log_joint += np.log(p_i if val == 1 else (1 - p_i))
+        logp = np.log(self.nb_prior.copy())
+        for i, v in evidence.items():
+            logp += np.log(self.nb_cond_probs[i][v])
+        exp = np.exp(logp - np.max(logp))
+        return exp / exp.sum()
 
-        # normalize
-        joint = np.exp(log_joint - log_joint.max())  # for numeric stability
-        return joint / joint.sum()
-
-    # Utility methods
     @staticmethod
     def load_csv(filepath: str) -> np.ndarray:
-        """
-        Reads a CSV with columns [Symptom1..Symptom4,Condition] into a numpy array.
-        """
         df = pd.read_csv(filepath)
-        return df[['Symptom1', 'Symptom2', 'Symptom3', 'Symptom4', 'Condition']].values.astype(int)
+        cols = df.columns.tolist()
+        return df[cols].values.astype(int)
 
     @staticmethod
     def compute_all_marginals(model):
-        """
-        Given an instance of this model with joint_prob fitted,
-        returns a dict of marginals for each variable.
-        """
-        names = ['Symptom1', 'Symptom2', 'Symptom3', 'Symptom4', 'Condition']
-        return {name: model.marginal(i) for i, name in enumerate(names)}
+        k = len(model.symptom_dims)
+        names = [f"Symptom{i+1}" for i in range(k)] + ["Condition"]
+        return {n: model.marginal(i) for i, n in enumerate(names)}
